@@ -4,61 +4,70 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Whisper Studio</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <div class="app">
 
   <!-- Header -->
-  <div class="header">
-    <div class="logo"><span class="logo-icon">◈</span>WHISPER<em>STUDIO</em></div>
-    <div class="status-pill"><div class="dot" id="dot"></div><span id="stTxt">READY</span></div>
+  <div class="hdr">
+    <div class="logo">WHISPER<span>STUDIO</span></div>
+    <div class="pill">
+      <div class="dot" id="dot"></div>
+      <span id="stTxt">READY</span>
+    </div>
   </div>
 
-  <!-- Error alert -->
+  <!-- Alert -->
   <div class="alert" id="alertBox">
-    <span class="alert-icon">⚠</span>
-    <div><strong id="alertTitle">Error</strong><span id="alertMsg"></span></div>
+    <span>&#9888;</span>
+    <div><b id="alertTitle"></b><span id="alertMsg"></span></div>
   </div>
 
-  <!-- Info banner -->
-  <div class="info-banner" id="infoBanner">
-    <span>ℹ</span>
-    <span id="infoMsg"></span>
+  <!-- Info -->
+  <div class="info" id="infoBox">
+    <span>&#8505;</span><span id="infoMsg"></span>
   </div>
 
-  <!-- Waveform -->
-  <div class="viz"><canvas id="waveCanvas"></canvas><div class="viz-lbl" id="vizLbl">IDLE</div></div>
+  <!-- Waveform Canvas -->
+  <div class="viz">
+    <canvas id="cv"></canvas>
+    <div class="viz-lbl" id="vizLbl">IDLE</div>
+  </div>
 
   <!-- Panels -->
   <div class="panels">
+
+    <!-- Mic -->
     <div class="panel">
-      <div class="tag">01 / MICROPHONE</div>
-      <button class="rec-btn" id="recBtn" onclick="toggleRecording()">
-        <span class="rec-ico" id="recIco">●</span><span id="recLbl">RECORD</span>
+      <div class="tag">01 / Microphone</div>
+      <button class="rec-btn" id="recBtn" onclick="toggleRec()">
+        <span class="rec-ico" id="recIco">&#9679;</span>
+        <span id="recLbl">Record</span>
       </button>
       <div class="timer-row">
         <div class="timer" id="timer">00:00</div>
         <div class="rec-st" id="recSt"></div>
       </div>
     </div>
+
+    <!-- File -->
     <div class="panel">
-      <div class="tag">02 / FILE UPLOAD</div>
-      <label class="file-label" id="fileDrop" for="audioFile">
-        <span>⬆</span><span id="fileName">BROWSE OR DROP</span>
+      <div class="tag">02 / File Upload</div>
+      <label class="file-lbl" id="fileDrop" for="audioFile">
+        <span>&#8679;</span><span id="fileName">Browse or Drop</span>
       </label>
-      <input type="file" id="audioFile" accept="audio/*" onchange="onFileSelect(this)">
-      <button class="up-btn" id="upBtn" onclick="uploadAudio()">TRANSCRIBE →</button>
+      <input type="file" id="audioFile" accept="audio/*" onchange="onFileSel(this)">
+      <button class="up-btn" id="upBtn" onclick="uploadAudio()">Transcribe &rarr;</button>
     </div>
+
   </div>
 
   <!-- Output -->
   <div class="output">
     <div class="out-hdr">
-      <span class="tag">03 / OUTPUT</span>
-      <button class="copy-btn" id="copyBtn" onclick="copyResult()">⧉ COPY</button>
+      <span class="tag">03 / Output</span>
+      <button class="copy-btn" id="copyBtn" onclick="copyRes()">&#10063; Copy</button>
     </div>
     <div class="out-body">
       <textarea id="result" placeholder="Transcription will appear here…" readonly></textarea>
@@ -67,5 +76,6 @@
   </div>
 
 </div>
+<script src="js/script.js"></script>
 </body>
 </html>

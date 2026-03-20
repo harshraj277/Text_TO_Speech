@@ -1,276 +1,277 @@
-// ── Startup check ─────────────────────────────────────────────────────────────
-(function(){
-    var proto = location.protocol;
-    var isSecure = proto === 'https:' || proto === 'http:';
-    if (!isSecure) {
-      showInfo('⚠ Microphone requires a served page. Open this file via your Spring Boot server at <strong>http://localhost:8080</strong> — not by double-clicking the HTML file. File upload still works.');
+/* ── Startup checks ── */
+(function () {
+    if (location.protocol === 'file:') {
+      showInfo('Microphone requires HTTP. Place this file in <b>src/main/resources/static/</b> and open <b>http://localhost:8080</b> — File upload works from any location.');
     }
-    if (!navigator.mediaDevices || !window.MediaRecorder) {
-      showAlert('Mic API unavailable', 'Your browser does not support microphone recording. Try Chrome or Firefox served over HTTP/HTTPS.');
+    if (!window.MediaRecorder || !navigator.mediaDevices) {
+      showAlert('Mic unavailable', 'Your browser does not support audio recording. Use Chrome on http://localhost:8080.');
       document.getElementById('recBtn').disabled = true;
     }
   })();
-   
-  function showAlert(title, msg) {
-    document.getElementById('alertTitle').textContent = title;
-    document.getElementById('alertMsg').textContent = ' ' + msg;
+  
+  function showAlert(t, m) {
+    document.getElementById('alertTitle').textContent = t + ': ';
+    document.getElementById('alertMsg').textContent = m;
     document.getElementById('alertBox').classList.add('show');
   }
   function hideAlert() { document.getElementById('alertBox').classList.remove('show'); }
-  function showInfo(html) {
-    document.getElementById('infoMsg').innerHTML = html;
-    document.getElementById('infoBanner').classList.add('show');
+  function showInfo(h) {
+    document.getElementById('infoMsg').innerHTML = h;
+    document.getElementById('infoBox').classList.add('show');
   }
-   
-  // ── Canvas ────────────────────────────────────────────────────────────────────
-  var canvas = document.getElementById('waveCanvas');
-  var ctx = canvas.getContext('2d');
-   
-  function resizeCanvas(){
-    var dpr = window.devicePixelRatio||1;
-    canvas.width  = canvas.offsetWidth  * dpr;
-    canvas.height = canvas.offsetHeight * dpr;
-    ctx.scale(dpr,dpr);
+  
+  /* ── Canvas ── */
+  var cv  = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  
+  function resize() {
+    var dpr = window.devicePixelRatio || 1;
+    cv.width  = cv.offsetWidth  * dpr;
+    cv.height = cv.offsetHeight * dpr;
+    ctx.scale(dpr, dpr);
   }
-  resizeCanvas();
-  window.addEventListener('resize', function(){ resizeCanvas(); drawIdle(); });
-   
-  function drawIdle(){
-    var W=canvas.offsetWidth, H=canvas.offsetHeight;
-    ctx.clearRect(0,0,W,H);
-    ctx.strokeStyle='#2a2a35'; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.moveTo(0,H/2); ctx.lineTo(W,H/2); ctx.stroke();
-    for(var i=0;i<W;i+=18){
-      var h=(i%72===0)?9:3;
-      ctx.beginPath(); ctx.moveTo(i,H/2-h); ctx.lineTo(i,H/2+h); ctx.stroke();
+  resize();
+  window.addEventListener('resize', function () { resize(); idle(); });
+  
+  function idle() {
+    var W = cv.offsetWidth, H = cv.offsetHeight;
+    ctx.clearRect(0, 0, W, H);
+    ctx.strokeStyle = '#2e2e3e';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke();
+    for (var i = 0; i < W; i += 16) {
+      var h = i % 64 === 0 ? 8 : 3;
+      ctx.beginPath(); ctx.moveTo(i, H / 2 - h); ctx.lineTo(i, H / 2 + h); ctx.stroke();
     }
   }
-  drawIdle();
-   
-  var analyser=null,audioCtx=null,animId=null;
-   
-  function startVisualizer(stream){
+  idle();
+  
+  var analyser = null, audioCtx = null, animId = null;
+  
+  function startViz(stream) {
     try {
-      audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       analyser = audioCtx.createAnalyser();
       analyser.fftSize = 1024;
       audioCtx.createMediaStreamSource(stream).connect(analyser);
-      drawLive();
-    } catch(e){ /* visualizer optional */ }
+      liveDraw();
+    } catch (e) {}
   }
-   
-  function drawLive(){
-    if(!analyser) return;
-    animId = requestAnimationFrame(drawLive);
-    var W=canvas.offsetWidth, H=canvas.offsetHeight;
-    var buf=new Uint8Array(analyser.frequencyBinCount);
-    analyser.getByteTimeDomainData(buf);
-    ctx.clearRect(0,0,W,H);
-    ctx.shadowColor='#f0a500'; ctx.shadowBlur=8;
-    ctx.strokeStyle='#f0a500'; ctx.lineWidth=2;
+  
+  function liveDraw() {
+    if (!analyser) return;
+    animId = requestAnimationFrame(liveDraw);
+    var W = cv.offsetWidth, H = cv.offsetHeight;
+    var b = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteTimeDomainData(b);
+    ctx.clearRect(0, 0, W, H);
+    ctx.shadowColor = '#f5a623'; ctx.shadowBlur = 8;
+    ctx.strokeStyle = '#f5a623'; ctx.lineWidth = 2;
     ctx.beginPath();
-    for(var i=0;i<buf.length;i++){
-      var x=(i/buf.length)*W, y=(buf[i]/128)*(H/2);
-      i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    for (var i = 0; i < b.length; i++) {
+      var x = (i / b.length) * W, y = (b[i] / 128) * (H / 2);
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
     }
-    ctx.lineTo(W,H/2); ctx.stroke(); ctx.shadowBlur=0;
+    ctx.lineTo(W, H / 2); ctx.stroke(); ctx.shadowBlur = 0;
   }
-   
-  function stopVisualizer(){
-    if(animId){cancelAnimationFrame(animId);animId=null;}
-    if(audioCtx){audioCtx.close();audioCtx=null;}
-    analyser=null; drawIdle();
+  
+  function stopViz() {
+    if (animId) { cancelAnimationFrame(animId); animId = null; }
+    if (audioCtx) { audioCtx.close(); audioCtx = null; }
+    analyser = null;
+    idle();
   }
-   
-  var procId=null,procOff=0;
-  function drawProcessing(){
+  
+  var procId = null, pOff = 0;
+  
+  function procDraw() {
     cancelAnimationFrame(procId);
-    (function frame(){
-      procOff+=2;
-      var W=canvas.offsetWidth,H=canvas.offsetHeight;
-      ctx.clearRect(0,0,W,H);
-      for(var i=0;i<W+30;i+=18){
-        var x=i-(procOff%18), h=6+Math.abs(Math.sin((i+procOff)*.08))*24;
-        ctx.fillStyle='rgba(240,165,0,'+(0.1+Math.abs(Math.sin((i+procOff)*.05))*.3)+')';
-        ctx.fillRect(x-5,H/2-h/2,9,h);
+    (function f() {
+      pOff += 2;
+      var W = cv.offsetWidth, H = cv.offsetHeight;
+      ctx.clearRect(0, 0, W, H);
+      for (var i = 0; i < W + 30; i += 16) {
+        var x = i - (pOff % 16), h = 5 + Math.abs(Math.sin((i + pOff) * .07)) * 22;
+        ctx.fillStyle = 'rgba(245,166,35,' + (0.08 + Math.abs(Math.sin((i + pOff) * .05)) * .28) + ')';
+        ctx.fillRect(x - 4, H / 2 - h / 2, 8, h);
       }
-      procId=requestAnimationFrame(frame);
+      procId = requestAnimationFrame(f);
     })();
   }
-  function stopProcessing(){ cancelAnimationFrame(procId);procId=null; drawIdle(); }
-   
-  // ── Status ────────────────────────────────────────────────────────────────────
-  function setSt(cls,txt){
-    document.getElementById('dot').className='dot '+cls;
-    document.getElementById('stTxt').textContent=txt;
+  
+  function stopProc() { cancelAnimationFrame(procId); procId = null; idle(); }
+  
+  /* ── Status ── */
+  function setSt(cls, t) {
+    document.getElementById('dot').className = 'dot ' + cls;
+    document.getElementById('stTxt').textContent = t;
   }
-  function setViz(t){ document.getElementById('vizLbl').textContent=t; }
-   
-  // ── Recording ─────────────────────────────────────────────────────────────────
-  var mediaRecorder=null, audioChunks=[], timerInterval=null, elapsed=0;
-   
-  async function toggleRecording(){
-    if(mediaRecorder && mediaRecorder.state==='recording'){
-      stopRecording();
-    } else {
-      await startRecording();
-    }
+  function setViz(t) { document.getElementById('vizLbl').textContent = t; }
+  
+  /* ── Recording ── */
+  var mr = null, chunks = [], tInt = null, sec = 0;
+  
+  async function toggleRec() {
+    if (mr && mr.state === 'recording') stopRec();
+    else await startRec();
   }
-   
-  async function startRecording(){
-    hideAlert();
-    clearOutput();
-   
-    // Check API availability
-    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-      showAlert('Mic not available',
-        'navigator.mediaDevices is undefined. This usually means the page was opened as a local file (file://). ' +
-        'Serve it from Spring Boot: place index.html in src/main/resources/static/ and open http://localhost:8080');
+  
+  async function startRec() {
+    hideAlert(); clearOut();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showAlert('Blocked', 'Open the page from http://localhost:8080 — mic is blocked on file:// URLs.');
       return;
     }
-   
     try {
       var stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      audioChunks = [];
-   
-      // Pick a supported MIME type
-      var mimeType = '';
-      var candidates = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'];
-      for(var i=0;i<candidates.length;i++){
-        if(MediaRecorder.isTypeSupported(candidates[i])){ mimeType=candidates[i]; break; }
-      }
-   
-      mediaRecorder = mimeType ? new MediaRecorder(stream,{mimeType:mimeType}) : new MediaRecorder(stream);
-      mediaRecorder.ondataavailable = function(e){ if(e.data && e.data.size>0) audioChunks.push(e.data); };
-      mediaRecorder.onstop = onRecordStop;
-      mediaRecorder.onerror = function(e){ showAlert('Recorder error', e.error ? e.error.message : String(e)); };
-      mediaRecorder.start(100); // collect chunks every 100ms
-   
-      startVisualizer(stream);
-      setSt('rec','RECORDING'); setViz('LIVE INPUT');
-   
-      var btn=document.getElementById('recBtn');
+      chunks = [];
+  
+      var mime = '';
+      ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'].forEach(function (m) {
+        if (!mime && MediaRecorder.isTypeSupported(m)) mime = m;
+      });
+  
+      mr = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      mr.ondataavailable = function (e) { if (e.data && e.data.size > 0) chunks.push(e.data); };
+      mr.onstop = onStop;
+      mr.onerror = function (e) { showAlert('Recorder error', e.error ? e.error.message : String(e)); };
+      mr.start(100);
+  
+      startViz(stream);
+      setSt('rec', 'RECORDING'); setViz('LIVE INPUT');
+  
+      var btn = document.getElementById('recBtn');
       btn.classList.add('is-rec');
-      document.getElementById('recIco').textContent='■';
-      document.getElementById('recLbl').textContent='STOP';
-      document.getElementById('recSt').textContent='● REC';
-   
-      elapsed=0;
-      document.getElementById('timer').style.display='block';
-      timerInterval=setInterval(function(){
-        elapsed++;
-        var m=String(Math.floor(elapsed/60)).padStart(2,'0'), s=String(elapsed%60).padStart(2,'0');
-        document.getElementById('timer').textContent=m+':'+s;
-      },1000);
-   
-    } catch(e){
-      var hint = '';
-      if(e.name==='NotAllowedError'||e.name==='PermissionDeniedError'){
-        hint = 'Microphone permission was denied. Click the 🔒 icon in your browser address bar and allow microphone access, then try again.';
-      } else if(e.name==='NotFoundError'||e.name==='DevicesNotFoundError'){
-        hint = 'No microphone found. Please connect a microphone and try again.';
-      } else if(e.name==='NotReadableError'){
-        hint = 'Microphone is in use by another application. Close other apps using the mic and try again.';
-      } else if(e.name==='SecurityError'){
-        hint = 'Blocked by browser security. Open this page from http://localhost:8080 instead of a local file path.';
-      } else {
-        hint = e.message || String(e);
-      }
-      showAlert(e.name || 'Mic Error', hint);
+      document.getElementById('recIco').textContent = '■';
+      document.getElementById('recLbl').textContent = 'Stop';
+      document.getElementById('recSt').textContent  = '● REC';
+  
+      sec = 0;
+      document.getElementById('timer').style.display = 'block';
+      tInt = setInterval(function () {
+        sec++;
+        var m = String(Math.floor(sec / 60)).padStart(2, '0');
+        var s = String(sec % 60).padStart(2, '0');
+        document.getElementById('timer').textContent = m + ':' + s;
+      }, 1000);
+  
+    } catch (e) {
+      var msg =
+        e.name === 'NotAllowedError'  ? 'Permission denied — click the 🔒 in the address bar and allow microphone.' :
+        e.name === 'NotFoundError'    ? 'No microphone detected. Plug one in and retry.' :
+        e.name === 'NotReadableError' ? 'Microphone is in use by another app. Close it and retry.' :
+        e.name === 'SecurityError'    ? 'Blocked by browser. Serve from http://localhost:8080.' :
+        (e.message || String(e));
+      showAlert(e.name || 'Mic Error', msg);
     }
   }
-   
-  function stopRecording(){
-    if(mediaRecorder && mediaRecorder.state!=='inactive'){
-      mediaRecorder.stop();
-      mediaRecorder.stream.getTracks().forEach(function(t){t.stop();});
+  
+  function stopRec() {
+    if (mr && mr.state !== 'inactive') {
+      mr.stop();
+      mr.stream.getTracks().forEach(function (t) { t.stop(); });
     }
-    clearInterval(timerInterval);
-    stopVisualizer();
-    drawProcessing();
-   
-    var btn=document.getElementById('recBtn');
-    btn.classList.remove('is-rec'); btn.classList.add('is-proc'); btn.disabled=true;
-    document.getElementById('recIco').textContent='◌';
-    document.getElementById('recLbl').textContent='PROCESSING…';
-    document.getElementById('recSt').textContent='';
-    document.getElementById('timer').style.display='none';
-    setSt('proc','PROCESSING'); setViz('PROCESSING');
+    clearInterval(tInt);
+    stopViz();
+    procDraw();
+  
+    var btn = document.getElementById('recBtn');
+    btn.classList.remove('is-rec');
+    btn.classList.add('is-proc');
+    btn.disabled = true;
+    document.getElementById('recIco').textContent = '◌';
+    document.getElementById('recLbl').textContent = 'Processing…';
+    document.getElementById('recSt').textContent  = '';
+    document.getElementById('timer').style.display = 'none';
+    setSt('proc', 'PROCESSING'); setViz('PROCESSING');
   }
-   
-  async function onRecordStop(){
-    var mime = (mediaRecorder && mediaRecorder.mimeType) ? mediaRecorder.mimeType : 'audio/webm';
-    var ext = mime.includes('ogg')?'.ogg':mime.includes('mp4')?'.mp4':'.webm';
-    var blob = new Blob(audioChunks, {type:mime});
-   
-    if(blob.size === 0){
-      showAlert('Empty recording','No audio data was captured. Please try again and speak into your microphone.');
-      resetRecBtn(); stopProcessing(); return;
+  
+  async function onStop() {
+    var mime = mr && mr.mimeType ? mr.mimeType : 'audio/webm';
+    var ext  = mime.includes('ogg') ? '.ogg' : mime.includes('mp4') ? '.mp4' : '.webm';
+    var blob = new Blob(chunks, { type: mime });
+  
+    if (!blob.size) {
+      showAlert('Empty recording', 'No audio captured. Try again.');
+      resetBtn(); stopProc();
+      return;
     }
-   
-    await sendBlob(blob, 'recording'+ext);
-    resetRecBtn(); stopProcessing();
+    await send(blob, 'recording' + ext);
+    resetBtn(); stopProc();
   }
-   
-  function resetRecBtn(){
-    var btn=document.getElementById('recBtn');
-    btn.classList.remove('is-proc'); btn.disabled=false;
-    document.getElementById('recIco').textContent='●';
-    document.getElementById('recLbl').textContent='RECORD';
+  
+  function resetBtn() {
+    var btn = document.getElementById('recBtn');
+    btn.classList.remove('is-proc');
+    btn.disabled = false;
+    document.getElementById('recIco').textContent = '●';
+    document.getElementById('recLbl').textContent = 'Record';
   }
-   
-  // ── File upload ───────────────────────────────────────────────────────────────
-  function onFileSelect(input){
-    var drop=document.getElementById('fileDrop'), nm=document.getElementById('fileName');
-    if(input.files.length){ nm.textContent=input.files[0].name; drop.classList.add('has-file'); }
-    else { nm.textContent='BROWSE OR DROP'; drop.classList.remove('has-file'); }
+  
+  /* ── File Upload ── */
+  function onFileSel(input) {
+    var d = document.getElementById('fileDrop');
+    var n = document.getElementById('fileName');
+    if (input.files.length) {
+      n.textContent = input.files[0].name;
+      d.classList.add('has');
+    } else {
+      n.textContent = 'Browse or Drop';
+      d.classList.remove('has');
+    }
   }
-   
-  async function uploadAudio(){
-    var input=document.getElementById('audioFile');
-    if(!input.files.length){ showAlert('No file','Select an audio file first.'); return; }
+  
+  async function uploadAudio() {
+    var inp = document.getElementById('audioFile');
+    if (!inp.files.length) { showAlert('No file', 'Select an audio file first.'); return; }
     hideAlert();
-    var btn=document.getElementById('upBtn');
-    btn.disabled=true; btn.textContent='PROCESSING…';
-    setSt('proc','PROCESSING'); setViz('PROCESSING'); drawProcessing(); clearOutput();
-    await sendBlob(input.files[0], input.files[0].name);
-    btn.disabled=false; btn.textContent='TRANSCRIBE →'; stopProcessing();
+    var btn = document.getElementById('upBtn');
+    btn.disabled = true; btn.textContent = 'Processing…';
+    setSt('proc', 'PROCESSING'); setViz('PROCESSING'); procDraw(); clearOut();
+    await send(inp.files[0], inp.files[0].name);
+    btn.disabled = false; btn.textContent = 'Transcribe →';
+    stopProc();
   }
-   
-  // ── Send to backend ───────────────────────────────────────────────────────────
-  async function sendBlob(blob, filename){
-    var ta=document.getElementById('result');
-    try{
-      var fd=new FormData();
-      fd.append('file', blob, filename);
-      var res=await fetch('http://localhost:8080/api/speech',{method:'POST',body:fd});
-      if(!res.ok) throw new Error('HTTP '+res.status+' — '+await res.text());
-      var text=(await res.text()).trim();
-      ta.value=text;
-      updateChars(text.length);
-      if(text) document.getElementById('copyBtn').style.display='inline-block';
-      setSt('done','DONE'); setViz('COMPLETE');
-    } catch(e){
-      ta.value='ERROR: '+e.message+'\n\nMake sure Spring Boot is running on http://localhost:8080';
-      setSt('err','ERROR'); setViz('ERROR');
+  
+  /* ── Send to backend ── */
+  async function send(blob, name) {
+    var ta = document.getElementById('result');
+    try {
+      var fd = new FormData();
+      fd.append('file', blob, name);
+      var r = await fetch('http://localhost:8080/api/speech', { method: 'POST', body: fd });
+      if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + await r.text());
+      var t = (await r.text()).trim();
+      ta.value = t;
+      updateChars(t.length);
+      if (t) document.getElementById('copyBtn').style.display = 'inline-block';
+      setSt('done', 'DONE'); setViz('COMPLETE');
+    } catch (e) {
+      ta.value = 'ERROR: ' + e.message + '\n\nMake sure Spring Boot is running on http://localhost:8080';
+      setSt('err', 'ERROR'); setViz('ERROR');
       updateChars(0);
     }
   }
-   
-  // ── Utils ─────────────────────────────────────────────────────────────────────
-  function clearOutput(){
-    document.getElementById('result').value='';
-    document.getElementById('copyBtn').style.display='none';
+  
+  /* ── Utils ── */
+  function clearOut() {
+    document.getElementById('result').value = '';
+    document.getElementById('copyBtn').style.display = 'none';
     updateChars(0);
   }
-  function updateChars(n){ document.getElementById('chars').textContent=n+' chars'; }
-  document.getElementById('result').addEventListener('input',function(){ updateChars(this.value.length); });
-   
-  function copyResult(){
-    navigator.clipboard.writeText(document.getElementById('result').value).then(function(){
-      var btn=document.getElementById('copyBtn');
-      btn.textContent='✓ COPIED';
-      setTimeout(function(){ btn.textContent='⧉ COPY'; },2000);
+  
+  function updateChars(n) {
+    document.getElementById('chars').textContent = n + ' chars';
+  }
+  
+  document.getElementById('result').addEventListener('input', function () {
+    updateChars(this.value.length);
+  });
+  
+  function copyRes() {
+    navigator.clipboard.writeText(document.getElementById('result').value).then(function () {
+      var b = document.getElementById('copyBtn');
+      b.textContent = '✓ Copied';
+      setTimeout(function () { b.textContent = '⧉ Copy'; }, 2000);
     });
   }
- 
