@@ -1,320 +1,276 @@
-// ─── State ───────────────────────────────────────────────────────────────────
-let mediaRecorder = null;
-let audioChunks = [];
-let timerInterval = null;
-let secondsElapsed = 0;
-let analyser = null;
-let animFrameId = null;
-let audioCtx = null;
-
-// ─── Waveform Visualizer ──────────────────────────────────────────────────────
-const canvas = document.getElementById("waveCanvas");
-const ctx = canvas.getContext("2d");
-
-function resizeCanvas() {
-    canvas.width = canvas.offsetWidth * window.devicePixelRatio;
-    canvas.height = canvas.offsetHeight * window.devicePixelRatio;
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-}
-resizeCanvas();
-window.addEventListener("resize", resizeCanvas);
-
-function drawIdle() {
-    const W = canvas.offsetWidth;
-    const H = canvas.offsetHeight;
-    ctx.clearRect(0, 0, W, H);
-    ctx.strokeStyle = "#2a2a35";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, H / 2);
-    ctx.lineTo(W, H / 2);
-    ctx.stroke();
-
-    // Static tick marks
-    for (let i = 0; i < W; i += 20) {
-        const h = (i % 80 === 0) ? 10 : 4;
-        ctx.strokeStyle = "#2a2a35";
-        ctx.beginPath();
-        ctx.moveTo(i, H / 2 - h);
-        ctx.lineTo(i, H / 2 + h);
-        ctx.stroke();
+// ── Startup check ─────────────────────────────────────────────────────────────
+(function(){
+    var proto = location.protocol;
+    var isSecure = proto === 'https:' || proto === 'http:';
+    if (!isSecure) {
+      showInfo('⚠ Microphone requires a served page. Open this file via your Spring Boot server at <strong>http://localhost:8080</strong> — not by double-clicking the HTML file. File upload still works.');
     }
-}
-drawIdle();
-
-function drawWave() {
-    if (!analyser) return;
-    animFrameId = requestAnimationFrame(drawWave);
-
-    const W = canvas.offsetWidth;
-    const H = canvas.offsetHeight;
-    const bufLen = analyser.frequencyBinCount;
-    const dataArr = new Uint8Array(bufLen);
-    analyser.getByteTimeDomainData(dataArr);
-
-    ctx.clearRect(0, 0, W, H);
-
-    // Glow effect
-    ctx.shadowColor = "#f0a500";
-    ctx.shadowBlur = 8;
-    ctx.strokeStyle = "#f0a500";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-
-    const sliceW = W / bufLen;
-    let x = 0;
-    for (let i = 0; i < bufLen; i++) {
-        const v = dataArr[i] / 128.0;
-        const y = (v * H) / 2;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-        x += sliceW;
+    if (!navigator.mediaDevices || !window.MediaRecorder) {
+      showAlert('Mic API unavailable', 'Your browser does not support microphone recording. Try Chrome or Firefox served over HTTP/HTTPS.');
+      document.getElementById('recBtn').disabled = true;
     }
-    ctx.lineTo(W, H / 2);
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-}
-
-function startVisualizer(stream) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 1024;
-    const source = audioCtx.createMediaStreamSource(stream);
-    source.connect(analyser);
-    drawWave();
-}
-
-function stopVisualizer() {
-    if (animFrameId) cancelAnimationFrame(animFrameId);
-    if (audioCtx) audioCtx.close();
-    analyser = null;
-    drawIdle();
-}
-
-// ─── Status Helpers ───────────────────────────────────────────────────────────
-function setGlobalStatus(state, text) {
-    const el = document.getElementById("globalStatus");
-    el.className = "status-indicator " + state;
-    el.querySelector(".status-text").textContent = text;
-}
-
-function setVizLabel(text) {
-    document.getElementById("vizLabel").textContent = text;
-}
-
-// ─── Live Mic Recording ───────────────────────────────────────────────────────
-async function toggleRecording() {
-    if (mediaRecorder && mediaRecorder.state === "recording") {
-        stopRecording();
-    } else {
-        await startRecording();
+  })();
+   
+  function showAlert(title, msg) {
+    document.getElementById('alertTitle').textContent = title;
+    document.getElementById('alertMsg').textContent = ' ' + msg;
+    document.getElementById('alertBox').classList.add('show');
+  }
+  function hideAlert() { document.getElementById('alertBox').classList.remove('show'); }
+  function showInfo(html) {
+    document.getElementById('infoMsg').innerHTML = html;
+    document.getElementById('infoBanner').classList.add('show');
+  }
+   
+  // ── Canvas ────────────────────────────────────────────────────────────────────
+  var canvas = document.getElementById('waveCanvas');
+  var ctx = canvas.getContext('2d');
+   
+  function resizeCanvas(){
+    var dpr = window.devicePixelRatio||1;
+    canvas.width  = canvas.offsetWidth  * dpr;
+    canvas.height = canvas.offsetHeight * dpr;
+    ctx.scale(dpr,dpr);
+  }
+  resizeCanvas();
+  window.addEventListener('resize', function(){ resizeCanvas(); drawIdle(); });
+   
+  function drawIdle(){
+    var W=canvas.offsetWidth, H=canvas.offsetHeight;
+    ctx.clearRect(0,0,W,H);
+    ctx.strokeStyle='#2a2a35'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(0,H/2); ctx.lineTo(W,H/2); ctx.stroke();
+    for(var i=0;i<W;i+=18){
+      var h=(i%72===0)?9:3;
+      ctx.beginPath(); ctx.moveTo(i,H/2-h); ctx.lineTo(i,H/2+h); ctx.stroke();
     }
-}
-
-async function startRecording() {
-    clearResult();
+  }
+  drawIdle();
+   
+  var analyser=null,audioCtx=null,animId=null;
+   
+  function startVisualizer(stream){
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioChunks = [];
-
-        mediaRecorder = new MediaRecorder(stream);
-        mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
-        mediaRecorder.onstop = handleRecordingStop;
-        mediaRecorder.start();
-
-        startVisualizer(stream);
-
-        // Update UI
-        const btn = document.getElementById("recordBtn");
-        btn.textContent = "";
-        const icon = document.createElement("span");
-        icon.id = "recordIcon";
-        icon.className = "record-icon";
-        icon.textContent = "■";
-        const label = document.createElement("span");
-        label.textContent = "STOP";
-        btn.appendChild(icon);
-        btn.appendChild(label);
-        btn.classList.add("recording");
-
-        setGlobalStatus("recording", "RECORDING");
-        setVizLabel("LIVE");
-
-        document.getElementById("recordingStatus").textContent = "REC";
-        document.getElementById("timer").classList.remove("hidden");
-
-        secondsElapsed = 0;
-        timerInterval = setInterval(() => {
-            secondsElapsed++;
-            const m = String(Math.floor(secondsElapsed / 60)).padStart(2, "0");
-            const s = String(secondsElapsed % 60).padStart(2, "0");
-            document.getElementById("timer").textContent = `${m}:${s}`;
-        }, 1000);
-
-    } catch (err) {
-        alert("Microphone access denied or unavailable: " + err.message);
+      audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 1024;
+      audioCtx.createMediaStreamSource(stream).connect(analyser);
+      drawLive();
+    } catch(e){ /* visualizer optional */ }
+  }
+   
+  function drawLive(){
+    if(!analyser) return;
+    animId = requestAnimationFrame(drawLive);
+    var W=canvas.offsetWidth, H=canvas.offsetHeight;
+    var buf=new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteTimeDomainData(buf);
+    ctx.clearRect(0,0,W,H);
+    ctx.shadowColor='#f0a500'; ctx.shadowBlur=8;
+    ctx.strokeStyle='#f0a500'; ctx.lineWidth=2;
+    ctx.beginPath();
+    for(var i=0;i<buf.length;i++){
+      var x=(i/buf.length)*W, y=(buf[i]/128)*(H/2);
+      i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
     }
-}
-
-function stopRecording() {
-    if (mediaRecorder) {
-        mediaRecorder.stop();
-        mediaRecorder.stream.getTracks().forEach(t => t.stop());
+    ctx.lineTo(W,H/2); ctx.stroke(); ctx.shadowBlur=0;
+  }
+   
+  function stopVisualizer(){
+    if(animId){cancelAnimationFrame(animId);animId=null;}
+    if(audioCtx){audioCtx.close();audioCtx=null;}
+    analyser=null; drawIdle();
+  }
+   
+  var procId=null,procOff=0;
+  function drawProcessing(){
+    cancelAnimationFrame(procId);
+    (function frame(){
+      procOff+=2;
+      var W=canvas.offsetWidth,H=canvas.offsetHeight;
+      ctx.clearRect(0,0,W,H);
+      for(var i=0;i<W+30;i+=18){
+        var x=i-(procOff%18), h=6+Math.abs(Math.sin((i+procOff)*.08))*24;
+        ctx.fillStyle='rgba(240,165,0,'+(0.1+Math.abs(Math.sin((i+procOff)*.05))*.3)+')';
+        ctx.fillRect(x-5,H/2-h/2,9,h);
+      }
+      procId=requestAnimationFrame(frame);
+    })();
+  }
+  function stopProcessing(){ cancelAnimationFrame(procId);procId=null; drawIdle(); }
+   
+  // ── Status ────────────────────────────────────────────────────────────────────
+  function setSt(cls,txt){
+    document.getElementById('dot').className='dot '+cls;
+    document.getElementById('stTxt').textContent=txt;
+  }
+  function setViz(t){ document.getElementById('vizLbl').textContent=t; }
+   
+  // ── Recording ─────────────────────────────────────────────────────────────────
+  var mediaRecorder=null, audioChunks=[], timerInterval=null, elapsed=0;
+   
+  async function toggleRecording(){
+    if(mediaRecorder && mediaRecorder.state==='recording'){
+      stopRecording();
+    } else {
+      await startRecording();
+    }
+  }
+   
+  async function startRecording(){
+    hideAlert();
+    clearOutput();
+   
+    // Check API availability
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      showAlert('Mic not available',
+        'navigator.mediaDevices is undefined. This usually means the page was opened as a local file (file://). ' +
+        'Serve it from Spring Boot: place index.html in src/main/resources/static/ and open http://localhost:8080');
+      return;
+    }
+   
+    try {
+      var stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      audioChunks = [];
+   
+      // Pick a supported MIME type
+      var mimeType = '';
+      var candidates = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'];
+      for(var i=0;i<candidates.length;i++){
+        if(MediaRecorder.isTypeSupported(candidates[i])){ mimeType=candidates[i]; break; }
+      }
+   
+      mediaRecorder = mimeType ? new MediaRecorder(stream,{mimeType:mimeType}) : new MediaRecorder(stream);
+      mediaRecorder.ondataavailable = function(e){ if(e.data && e.data.size>0) audioChunks.push(e.data); };
+      mediaRecorder.onstop = onRecordStop;
+      mediaRecorder.onerror = function(e){ showAlert('Recorder error', e.error ? e.error.message : String(e)); };
+      mediaRecorder.start(100); // collect chunks every 100ms
+   
+      startVisualizer(stream);
+      setSt('rec','RECORDING'); setViz('LIVE INPUT');
+   
+      var btn=document.getElementById('recBtn');
+      btn.classList.add('is-rec');
+      document.getElementById('recIco').textContent='■';
+      document.getElementById('recLbl').textContent='STOP';
+      document.getElementById('recSt').textContent='● REC';
+   
+      elapsed=0;
+      document.getElementById('timer').style.display='block';
+      timerInterval=setInterval(function(){
+        elapsed++;
+        var m=String(Math.floor(elapsed/60)).padStart(2,'0'), s=String(elapsed%60).padStart(2,'0');
+        document.getElementById('timer').textContent=m+':'+s;
+      },1000);
+   
+    } catch(e){
+      var hint = '';
+      if(e.name==='NotAllowedError'||e.name==='PermissionDeniedError'){
+        hint = 'Microphone permission was denied. Click the 🔒 icon in your browser address bar and allow microphone access, then try again.';
+      } else if(e.name==='NotFoundError'||e.name==='DevicesNotFoundError'){
+        hint = 'No microphone found. Please connect a microphone and try again.';
+      } else if(e.name==='NotReadableError'){
+        hint = 'Microphone is in use by another application. Close other apps using the mic and try again.';
+      } else if(e.name==='SecurityError'){
+        hint = 'Blocked by browser security. Open this page from http://localhost:8080 instead of a local file path.';
+      } else {
+        hint = e.message || String(e);
+      }
+      showAlert(e.name || 'Mic Error', hint);
+    }
+  }
+   
+  function stopRecording(){
+    if(mediaRecorder && mediaRecorder.state!=='inactive'){
+      mediaRecorder.stop();
+      mediaRecorder.stream.getTracks().forEach(function(t){t.stop();});
     }
     clearInterval(timerInterval);
     stopVisualizer();
-
-    const btn = document.getElementById("recordBtn");
-    btn.innerHTML = `<span class="record-icon">◌</span><span>PROCESSING…</span>`;
-    btn.classList.remove("recording");
-    btn.classList.add("processing");
-    btn.disabled = true;
-
-    setGlobalStatus("processing", "PROCESSING");
-    setVizLabel("PROCESSING");
-    document.getElementById("recordingStatus").textContent = "";
-}
-
-async function handleRecordingStop() {
-    // FIX: Use the actual MIME type from the MediaRecorder, not hardcoded WAV
-    const mimeType = mediaRecorder.mimeType || "audio/webm";
-    const extension = mimeType.includes("ogg") ? ".ogg"
-                    : mimeType.includes("mp4") ? ".mp4"
-                    : ".webm";
-    const blob = new Blob(audioChunks, { type: mimeType });
-    await sendAudioBlob(blob, "recording" + extension);
-
-    // Reset record button
-    const btn = document.getElementById("recordBtn");
-    btn.innerHTML = `<span class="record-icon">●</span><span>RECORD</span>`;
-    btn.classList.remove("processing");
-    btn.disabled = false;
-}
-
-// ─── File Upload ──────────────────────────────────────────────────────────────
-function onFileSelect(input) {
-    const label = document.querySelector(".file-label");
-    const display = document.getElementById("fileNameDisplay");
-    if (input.files.length) {
-        display.textContent = input.files[0].name;
-        label.classList.add("has-file");
-    } else {
-        display.textContent = "DROP / BROWSE";
-        label.classList.remove("has-file");
-    }
-}
-
-async function uploadAudio() {
-    const fileInput = document.getElementById("audioFile");
-    if (!fileInput.files.length) {
-        alert("Select an audio file first.");
-        return;
-    }
-    const file = fileInput.files[0];
-    const uploadBtn = document.getElementById("uploadBtn");
-    uploadBtn.disabled = true;
-    uploadBtn.textContent = "PROCESSING…";
-    setGlobalStatus("processing", "PROCESSING");
-    setVizLabel("PROCESSING");
-
-    // Animate canvas during processing
     drawProcessing();
-
-    await sendAudioBlob(file, file.name);
-
-    uploadBtn.disabled = false;
-    uploadBtn.textContent = "TRANSCRIBE →";
-    stopProcessing();
-}
-
-// ─── Shared: Send to Backend ──────────────────────────────────────────────────
-async function sendAudioBlob(blob, filename) {
-    const resultArea = document.getElementById("result");
-    resultArea.value = "";
-    updateCharCount(0);
-
-    try {
-        const formData = new FormData();
-        formData.append("file", blob, filename);
-
-        const response = await fetch("http://localhost:8080/api/speech", {
-            method: "POST",
-            body: formData
-        });
-
-        if (!response.ok) {
-            throw new Error(`Server responded with status ${response.status}`);
-        }
-
-        const text = await response.text();
-        const trimmed = text.trim();
-        resultArea.value = trimmed;
-        updateCharCount(trimmed.length);
-        setGlobalStatus("done", "DONE");
-        setVizLabel("COMPLETE");
-
-        if (trimmed) {
-            document.getElementById("copyBtn").style.display = "inline-block";
-        }
-
-    } catch (err) {
-        resultArea.value = `ERROR: ${err.message}\n\nEnsure Spring Boot backend is running on http://localhost:8080`;
-        setGlobalStatus("", "ERROR");
-        setVizLabel("ERROR");
-    } finally {
-        document.getElementById("timer").classList.add("hidden");
-        document.getElementById("recordingStatus").textContent = "";
+   
+    var btn=document.getElementById('recBtn');
+    btn.classList.remove('is-rec'); btn.classList.add('is-proc'); btn.disabled=true;
+    document.getElementById('recIco').textContent='◌';
+    document.getElementById('recLbl').textContent='PROCESSING…';
+    document.getElementById('recSt').textContent='';
+    document.getElementById('timer').style.display='none';
+    setSt('proc','PROCESSING'); setViz('PROCESSING');
+  }
+   
+  async function onRecordStop(){
+    var mime = (mediaRecorder && mediaRecorder.mimeType) ? mediaRecorder.mimeType : 'audio/webm';
+    var ext = mime.includes('ogg')?'.ogg':mime.includes('mp4')?'.mp4':'.webm';
+    var blob = new Blob(audioChunks, {type:mime});
+   
+    if(blob.size === 0){
+      showAlert('Empty recording','No audio data was captured. Please try again and speak into your microphone.');
+      resetRecBtn(); stopProcessing(); return;
     }
-}
-
-// ─── Processing Canvas Animation ─────────────────────────────────────────────
-let procFrame = null;
-let procOffset = 0;
-
-function drawProcessing() {
-    cancelAnimationFrame(procFrame);
-    function frame() {
-        procOffset += 2;
-        const W = canvas.offsetWidth;
-        const H = canvas.offsetHeight;
-        ctx.clearRect(0, 0, W, H);
-        for (let i = 0; i < W + 60; i += 20) {
-            const x = (i - procOffset % 20);
-            const h = 8 + Math.sin((i + procOffset) * 0.1) * 20;
-            ctx.fillStyle = `rgba(240,165,0,${0.15 + Math.abs(Math.sin((i + procOffset) * 0.05)) * 0.3})`;
-            ctx.fillRect(x - 6, H / 2 - h / 2, 10, h);
-        }
-        procFrame = requestAnimationFrame(frame);
+   
+    await sendBlob(blob, 'recording'+ext);
+    resetRecBtn(); stopProcessing();
+  }
+   
+  function resetRecBtn(){
+    var btn=document.getElementById('recBtn');
+    btn.classList.remove('is-proc'); btn.disabled=false;
+    document.getElementById('recIco').textContent='●';
+    document.getElementById('recLbl').textContent='RECORD';
+  }
+   
+  // ── File upload ───────────────────────────────────────────────────────────────
+  function onFileSelect(input){
+    var drop=document.getElementById('fileDrop'), nm=document.getElementById('fileName');
+    if(input.files.length){ nm.textContent=input.files[0].name; drop.classList.add('has-file'); }
+    else { nm.textContent='BROWSE OR DROP'; drop.classList.remove('has-file'); }
+  }
+   
+  async function uploadAudio(){
+    var input=document.getElementById('audioFile');
+    if(!input.files.length){ showAlert('No file','Select an audio file first.'); return; }
+    hideAlert();
+    var btn=document.getElementById('upBtn');
+    btn.disabled=true; btn.textContent='PROCESSING…';
+    setSt('proc','PROCESSING'); setViz('PROCESSING'); drawProcessing(); clearOutput();
+    await sendBlob(input.files[0], input.files[0].name);
+    btn.disabled=false; btn.textContent='TRANSCRIBE →'; stopProcessing();
+  }
+   
+  // ── Send to backend ───────────────────────────────────────────────────────────
+  async function sendBlob(blob, filename){
+    var ta=document.getElementById('result');
+    try{
+      var fd=new FormData();
+      fd.append('file', blob, filename);
+      var res=await fetch('http://localhost:8080/api/speech',{method:'POST',body:fd});
+      if(!res.ok) throw new Error('HTTP '+res.status+' — '+await res.text());
+      var text=(await res.text()).trim();
+      ta.value=text;
+      updateChars(text.length);
+      if(text) document.getElementById('copyBtn').style.display='inline-block';
+      setSt('done','DONE'); setViz('COMPLETE');
+    } catch(e){
+      ta.value='ERROR: '+e.message+'\n\nMake sure Spring Boot is running on http://localhost:8080';
+      setSt('err','ERROR'); setViz('ERROR');
+      updateChars(0);
     }
-    frame();
-}
-
-function stopProcessing() {
-    cancelAnimationFrame(procFrame);
-    drawIdle();
-}
-
-// ─── Utilities ────────────────────────────────────────────────────────────────
-function clearResult() {
-    document.getElementById("result").value = "";
-    document.getElementById("copyBtn").style.display = "none";
-    updateCharCount(0);
-}
-
-function updateCharCount(n) {
-    document.getElementById("charCount").textContent = n + " chars";
-}
-
-document.getElementById("result").addEventListener("input", function () {
-    updateCharCount(this.value.length);
-});
-
-function copyResult() {
-    const text = document.getElementById("result").value;
-    navigator.clipboard.writeText(text).then(() => {
-        const btn = document.getElementById("copyBtn");
-        const orig = btn.textContent;
-        btn.textContent = "✓ COPIED";
-        setTimeout(() => btn.textContent = orig, 2000);
+  }
+   
+  // ── Utils ─────────────────────────────────────────────────────────────────────
+  function clearOutput(){
+    document.getElementById('result').value='';
+    document.getElementById('copyBtn').style.display='none';
+    updateChars(0);
+  }
+  function updateChars(n){ document.getElementById('chars').textContent=n+' chars'; }
+  document.getElementById('result').addEventListener('input',function(){ updateChars(this.value.length); });
+   
+  function copyResult(){
+    navigator.clipboard.writeText(document.getElementById('result').value).then(function(){
+      var btn=document.getElementById('copyBtn');
+      btn.textContent='✓ COPIED';
+      setTimeout(function(){ btn.textContent='⧉ COPY'; },2000);
     });
-}
+  }
+ 
