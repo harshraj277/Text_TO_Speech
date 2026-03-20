@@ -1,13 +1,11 @@
 package com.whisper.speech_to_text.controller;
 
+import java.io.BufferedReader;
 import java.io.File;
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.io.InputStreamReader;
 import java.nio.file.Files;
-import java.util.Base64;
+import java.util.Arrays;
+import java.util.List;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -22,138 +20,132 @@ import org.springframework.web.multipart.MultipartFile;
 @CrossOrigin
 public class SpeechController {
 
-    // Ollama runs locally on port 11434 by default
-    private static final String OLLAMA_URL = "http://localhost:11434/api/generate";
-    private static final String MODEL      = "dimavz/whisper-tiny";
+    /**
+     * Common locations where whisper (openai-whisper) gets installed on Windows.
+     * Python pip installs scripts into the Scripts folder of whichever Python is active.
+     */
+    private static final List<String> WHISPER_CANDIDATES = Arrays.asList(
+        // Try plain name first (works if it's on PATH)
+        "whisper",
+        // Common Windows Python/pip install locations
+        System.getProperty("user.home") + "\\AppData\\Local\\Programs\\Python\\Python312\\Scripts\\whisper.exe",
+        System.getProperty("user.home") + "\\AppData\\Local\\Programs\\Python\\Python311\\Scripts\\whisper.exe",
+        System.getProperty("user.home") + "\\AppData\\Local\\Programs\\Python\\Python310\\Scripts\\whisper.exe",
+        System.getProperty("user.home") + "\\AppData\\Roaming\\Python\\Python312\\Scripts\\whisper.exe",
+        System.getProperty("user.home") + "\\AppData\\Roaming\\Python\\Python311\\Scripts\\whisper.exe",
+        System.getProperty("user.home") + "\\AppData\\Roaming\\Python\\Python310\\Scripts\\whisper.exe",
+        // Conda / Anaconda
+        System.getProperty("user.home") + "\\anaconda3\\Scripts\\whisper.exe",
+        System.getProperty("user.home") + "\\miniconda3\\Scripts\\whisper.exe",
+        "C:\\ProgramData\\anaconda3\\Scripts\\whisper.exe",
+        "C:\\ProgramData\\miniconda3\\Scripts\\whisper.exe",
+        // Mac / Linux fallbacks
+        "/usr/local/bin/whisper",
+        "/usr/bin/whisper",
+        System.getProperty("user.home") + "/.local/bin/whisper"
+    );
+
+    private String findWhisper() {
+        for (String candidate : WHISPER_CANDIDATES) {
+            if (candidate.equals("whisper")) {
+                // Test if it resolves on PATH by trying `where whisper` (Windows) or `which whisper` (Unix)
+                try {
+                    boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
+                    ProcessBuilder pb = isWindows
+                        ? new ProcessBuilder("where", "whisper")
+                        : new ProcessBuilder("which", "whisper");
+                    pb.redirectErrorStream(true);
+                    Process p = pb.start();
+                    BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()));
+                    String line = br.readLine();
+                    p.waitFor();
+                    if (line != null && !line.isEmpty()) {
+                        return line.trim(); // full path found via PATH
+                    }
+                } catch (Exception ignored) {}
+            } else {
+                File f = new File(candidate);
+                if (f.exists() && f.canExecute()) {
+                    return candidate;
+                }
+            }
+        }
+        return null;
+    }
 
     @PostMapping("/speech")
     public ResponseEntity<String> speechToText(@RequestParam("file") MultipartFile file) {
 
+        // 1. Find whisper executable
+        String whisperPath = findWhisper();
+        if (whisperPath == null) {
+            return ResponseEntity.internalServerError().body(
+                "whisper not found.\n\n" +
+                "Install it with:\n  pip install openai-whisper\n\n" +
+                "Then restart Spring Boot. If already installed, run this in cmd and paste the output:\n  where whisper"
+            );
+        }
+
         File temp = null;
-
         try {
-            // ── 1. Save uploaded audio to a temp file ──────────────────────
-            String originalFilename = file.getOriginalFilename();
-            String extension = (originalFilename != null && originalFilename.contains("."))
-                    ? originalFilename.substring(originalFilename.lastIndexOf('.'))
-                    : ".webm";
-
-            temp = File.createTempFile("audio", extension);
+            // 2. Save uploaded file with correct extension
+            String original = file.getOriginalFilename();
+            String ext = (original != null && original.contains("."))
+                ? original.substring(original.lastIndexOf('.'))
+                : ".webm";
+            temp = File.createTempFile("audio_", ext);
             file.transferTo(temp);
 
-            // ── 2. Base64-encode the audio bytes ───────────────────────────
-            byte[] audioBytes = Files.readAllBytes(temp.toPath());
-            String base64Audio = Base64.getEncoder().encodeToString(audioBytes);
+            // 3. Run whisper
+            File outputDir = temp.getParentFile();
+            ProcessBuilder pb = new ProcessBuilder(
+                whisperPath,
+                temp.getAbsolutePath(),
+                "--model", "base",
+                "--output_format", "txt",
+                "--output_dir", outputDir.getAbsolutePath()
+            );
+            pb.redirectErrorStream(true);
+            pb.environment().put("PYTHONIOENCODING", "utf-8");
 
-            // ── 3. Build the Ollama JSON request body ──────────────────────
-            //
-            // dimavz/whisper-tiny accepts audio as a base64 string
-            // passed inside the "images" array (same pattern Ollama uses
-            // for multimodal models like llava).
-            //
-            String jsonBody = "{"
-                + "\"model\": \"" + MODEL + "\","
-                + "\"prompt\": \"Transcribe the audio.\","
-                + "\"images\": [\"" + base64Audio + "\"],"
-                + "\"stream\": false"
-                + "}";
+            Process process = pb.start();
 
-            // ── 4. POST to Ollama ──────────────────────────────────────────
-            HttpClient client = HttpClient.newHttpClient();
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(OLLAMA_URL))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
-                    .build();
-
-            HttpResponse<String> response =
-                    client.send(request, HttpResponse.BodyHandlers.ofString());
-
-            if (response.statusCode() != 200) {
-                return ResponseEntity.internalServerError()
-                        .body("Ollama error " + response.statusCode() + ": " + response.body());
-            }
-
-            // ── 5. Parse the response JSON ─────────────────────────────────
-            // Ollama returns: {"model":"...","response":"transcribed text","done":true,...}
-            // Simple parse without pulling in a JSON library:
-            String body       = response.body();
-            String transcript = extractJsonField(body, "response");
-
-            if (transcript == null || transcript.isBlank()) {
-                return ResponseEntity.ok("(no speech detected)");
-            }
-
-            return ResponseEntity.ok(transcript.trim());
-
-        } catch (IOException | InterruptedException e) {
-            String hint = "";
-            if (e.getMessage() != null && e.getMessage().contains("Connection refused")) {
-                hint = "\n\nOllama is not running. Start it with:\n  ollama serve\n"
-                     + "Then verify the model is available:\n  ollama list";
-            }
-            return ResponseEntity.internalServerError()
-                    .body("Error: " + e.getMessage() + hint);
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError()
-                    .body("Error: " + e.getMessage());
-        } finally {
-            if (temp != null && temp.exists()) {
-                temp.delete();
-            }
-        }
-    }
-
-    /**
-     * Extracts the value of a JSON string field by key.
-     * e.g. extractJsonField("{\"response\":\"hello world\"}", "response") → "hello world"
-     *
-     * Handles basic escaped characters. Avoids adding a JSON dependency.
-     */
-    private String extractJsonField(String json, String key) {
-        String search = "\"" + key + "\"";
-        int keyIdx = json.indexOf(search);
-        if (keyIdx == -1) return null;
-
-        int colon = json.indexOf(':', keyIdx + search.length());
-        if (colon == -1) return null;
-
-        // Skip whitespace after colon
-        int start = colon + 1;
-        while (start < json.length() && Character.isWhitespace(json.charAt(start))) start++;
-
-        if (start >= json.length()) return null;
-
-        if (json.charAt(start) == '"') {
-            // String value — find the closing quote respecting escapes
-            StringBuilder sb = new StringBuilder();
-            int i = start + 1;
-            while (i < json.length()) {
-                char c = json.charAt(i);
-                if (c == '\\' && i + 1 < json.length()) {
-                    char next = json.charAt(i + 1);
-                    switch (next) {
-                        case '"':  sb.append('"');  i += 2; break;
-                        case '\\': sb.append('\\'); i += 2; break;
-                        case 'n':  sb.append('\n'); i += 2; break;
-                        case 'r':  sb.append('\r'); i += 2; break;
-                        case 't':  sb.append('\t'); i += 2; break;
-                        default:   sb.append(next); i += 2; break;
-                    }
-                } else if (c == '"') {
-                    break;
-                } else {
-                    sb.append(c);
-                    i++;
+            // Read output while process runs (prevents buffer deadlock)
+            StringBuilder logs = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    logs.append(line).append("\n");
                 }
             }
-            return sb.toString();
-        }
 
-        // Non-string value (number, bool, null) — read until comma or brace
-        int end = start;
-        while (end < json.length() && json.charAt(end) != ',' && json.charAt(end) != '}') end++;
-        return json.substring(start, end).trim();
+            int exitCode = process.waitFor();
+
+            if (exitCode != 0) {
+                return ResponseEntity.internalServerError()
+                    .body("Whisper failed (exit " + exitCode + "):\n" + logs.toString());
+            }
+
+            // 4. Read the .txt output file whisper creates
+            String baseName = temp.getName().substring(0, temp.getName().lastIndexOf('.'));
+            File txtFile = new File(outputDir, baseName + ".txt");
+
+            String transcription;
+            if (txtFile.exists()) {
+                transcription = new String(Files.readAllBytes(txtFile.toPath()), "UTF-8").trim();
+                txtFile.delete();
+            } else {
+                // Whisper sometimes prints transcript to stdout — use that
+                transcription = logs.toString().trim();
+            }
+
+            return ResponseEntity.ok(transcription.isEmpty() ? "(No speech detected)" : transcription);
+
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                .body("Error: " + e.getMessage());
+        } finally {
+            if (temp != null && temp.exists()) temp.delete();
+        }
     }
 }
