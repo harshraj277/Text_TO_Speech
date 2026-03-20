@@ -1,88 +1,71 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Whisper Studio</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Whisper Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div class="app">
 
-<div class="noise"></div>
+  <!-- Header -->
+  <div class="header">
+    <div class="logo"><span class="logo-icon">◈</span>WHISPER<em>STUDIO</em></div>
+    <div class="status-pill"><div class="dot" id="dot"></div><span id="stTxt">READY</span></div>
+  </div>
 
-<main class="app">
+  <!-- Error alert -->
+  <div class="alert" id="alertBox">
+    <span class="alert-icon">⚠</span>
+    <div><strong id="alertTitle">Error</strong><span id="alertMsg"></span></div>
+  </div>
 
-    <!-- Header -->
-    <header class="app-header">
-        <div class="logo">
-            <span class="logo-icon">◈</span>
-            <span class="logo-text">WHISPER<em>STUDIO</em></span>
-        </div>
-        <div class="status-indicator" id="globalStatus">
-            <span class="dot"></span>
-            <span class="status-text">READY</span>
-        </div>
-    </header>
+  <!-- Info banner -->
+  <div class="info-banner" id="infoBanner">
+    <span>ℹ</span>
+    <span id="infoMsg"></span>
+  </div>
 
-    <!-- Waveform Visualizer -->
-    <div class="visualizer-wrap">
-        <canvas id="waveCanvas"></canvas>
-        <div class="visualizer-label" id="vizLabel">IDLE</div>
+  <!-- Waveform -->
+  <div class="viz"><canvas id="waveCanvas"></canvas><div class="viz-lbl" id="vizLbl">IDLE</div></div>
+
+  <!-- Panels -->
+  <div class="panels">
+    <div class="panel">
+      <div class="tag">01 / MICROPHONE</div>
+      <button class="rec-btn" id="recBtn" onclick="toggleRecording()">
+        <span class="rec-ico" id="recIco">●</span><span id="recLbl">RECORD</span>
+      </button>
+      <div class="timer-row">
+        <div class="timer" id="timer">00:00</div>
+        <div class="rec-st" id="recSt"></div>
+      </div>
     </div>
-
-    <!-- Controls Row -->
-    <div class="controls-row">
-
-        <!-- Mic Panel -->
-        <div class="panel" id="micPanel">
-            <div class="panel-tag">01 / MIC</div>
-            <button id="recordBtn" class="record-btn" onclick="toggleRecording()">
-                <span class="record-icon" id="recordIcon">●</span>
-                <span id="recordLabel">RECORD</span>
-            </button>
-            <div class="timer-wrap">
-                <div id="timer" class="timer hidden">00:00</div>
-                <div id="recordingStatus" class="rec-status"></div>
-            </div>
-        </div>
-
-        <div class="panel-divider">
-            <span>OR</span>
-        </div>
-
-        <!-- Upload Panel -->
-        <div class="panel" id="uploadPanel">
-            <div class="panel-tag">02 / FILE</div>
-            <label class="file-label" for="audioFile">
-                <span class="file-icon">⬆</span>
-                <span id="fileNameDisplay">DROP / BROWSE</span>
-            </label>
-            <input type="file" id="audioFile" accept="audio/*" onchange="onFileSelect(this)">
-            <button onclick="uploadAudio()" class="upload-btn" id="uploadBtn">
-                TRANSCRIBE →
-            </button>
-        </div>
-
+    <div class="panel">
+      <div class="tag">02 / FILE UPLOAD</div>
+      <label class="file-label" id="fileDrop" for="audioFile">
+        <span>⬆</span><span id="fileName">BROWSE OR DROP</span>
+      </label>
+      <input type="file" id="audioFile" accept="audio/*" onchange="onFileSelect(this)">
+      <button class="up-btn" id="upBtn" onclick="uploadAudio()">TRANSCRIBE →</button>
     </div>
+  </div>
 
-    <!-- Output -->
-    <div class="output-section">
-        <div class="output-header">
-            <span class="panel-tag">03 / OUTPUT</span>
-            <button onclick="copyResult()" class="copy-btn" id="copyBtn" style="display:none">
-                ⧉ COPY
-            </button>
-        </div>
-        <div class="textarea-wrap">
-            <textarea id="result" placeholder="Transcription will appear here…" readonly></textarea>
-            <div class="char-count" id="charCount">0 chars</div>
-        </div>
+  <!-- Output -->
+  <div class="output">
+    <div class="out-hdr">
+      <span class="tag">03 / OUTPUT</span>
+      <button class="copy-btn" id="copyBtn" onclick="copyResult()">⧉ COPY</button>
     </div>
+    <div class="out-body">
+      <textarea id="result" placeholder="Transcription will appear here…" readonly></textarea>
+      <div class="chars" id="chars">0 chars</div>
+    </div>
+  </div>
 
-</main>
-
-<script src="script.js"></script>
+</div>
 </body>
 </html>
